@@ -1,0 +1,938 @@
+Dbconnect.php
+<?php
+class DB{
+    public function __construct()
+    {
+        $this->connect();
+    }
+
+    protected function connect()
+    {
+        //define('DB_SERVER','localhost'); // db host
+        $DB_SERVER = 'localhost';
+        //define('DB_USERNAME','root'); //db username
+        $DB_USERNAME = 'root';
+        //define('DB_PASSWORD',''); // db password
+        $DB_PASSWORD = '';
+        //define('DB_DATABASE','mybookstore'); //db name
+        $DB_DATABASE = 'mybookstore';
+        // This will create the connection
+        $conn = new mysqli($DB_SERVER, $DB_USERNAME, $DB_PASSWORD, $DB_DATABASE);
+
+        if ($conn->connect_error) {
+            die("Connection failed: " . $conn->connect_error);
+        }
+        return $conn;
+    }
+    protected function disconnect(mysqli $conn){
+        $conn->close();
+    }
+    public function get($sql){
+        $data = [];
+        $conn = $this->connect();
+        $result = $conn->query($sql);
+        
+        // if state to check if the query was successful
+        if($result == FALSE)
+        {
+            //there was an error with  the query
+            // stop execution and show error
+            die("ERROR : " .$conn->error . "<br> SQL STATEMENT:" . $sql);
+        }
+        
+        if ($result->num_rows > 0) {
+            // data output
+            while($row = $result->fetch_assoc()) {
+//                echo "id: " . $row["id"]. " - Name: " . $row["firstname"]. " " . $row["lastname"]. "<br>";
+                $data[] = $row;
+            }
+        } else {
+            $data = [];
+        }
+        return $data;
+    }
+    public function getOne($sql){
+        $data = [];
+        $conn = $this->connect();
+        $result = $conn->query($sql);
+        if ($result->num_rows === 1) {
+            // output data of each row
+            $data = $result->fetch_assoc();
+        } else {
+            $data = [];
+        }
+        return $data;
+    }
+    public function update($query){
+
+    }
+    public function create($sql){
+        $data = [];
+        $conn = $this->connect();
+        $result = $conn->query($sql);
+        $id = $conn->insert_id;
+        if($result):
+            return $id;
+        else:
+            return false;
+        endif;
+    }
+    public function runQuery($sql){
+        $conn = $this->connect();
+        $result = $conn->query($sql);
+    }
+}
+?>
+Functios.php
+<?php
+require ('dbconnect.php');
+function getAllBooks(){
+    $db = new DB();
+    $sql = "SELECT * FROM books;";
+    $books = $db->get($sql);
+    return $books;
+}
+
+function processAction($action=null){
+    switch ($action){
+        case "logout": logout(); break;
+        case "login": login(); break;
+        case "register": register(); break;
+        //case "add":addToCart($_POST["id"]); break;
+        case "add":addToCart($_GET["id"]); break;
+        case "process_cart":processCart(); break;
+        case "remove_cart":removeFromCart($_GET["id"]); break;
+        case "new_book": addNewBook($_POST);break;
+        default: exit("Invalid Action.<a href='./'>Reload</a>"); break;
+    }
+}
+
+function processCart(){
+    if(isset($_POST['submit_actor'])){
+        $actor = $_POST["submit_actor"];
+        switch ($actor){
+            case "update":
+                updateCart();
+                break;
+            case "empty":
+                emptyCart();
+                break;
+            case "checkout":
+                checkout();
+                break;
+            default:
+                updateCart();
+                break;
+        }
+    }
+}
+function addToCart($id=null){
+    $db =new DB();
+    if (is_null($id)){
+        $id=intval($_GET['id']);
+    }
+
+    if(isset($_SESSION['cart'][$id])){
+
+        $_SESSION['cart'][$id]['quantity']++;
+
+    }else{
+
+        $sql="SELECT * FROM books 
+                WHERE id={$id}";
+        $book =$db->getOne($sql);
+        if(!empty($book)){
+            $_SESSION['cart'][$book['id']]=array(
+                "book_id"   => $book['id'],
+                "quantity"  => 1,
+                "price"     => $book['price'],
+                "title"     => $book['title'],
+                "author"    => $book['author'],
+                'cover_url' => $book['cover_url']
+            );
+
+
+        }else{
+
+            $message="This product id is invalid!";
+            die($message);
+        }
+
+    }
+}
+function updateCart(){
+    foreach($_POST['quantity'] as $key => $val) {
+        if($val==0) {
+            unset($_SESSION['cart'][$key]);
+        }else{
+            $_SESSION['cart'][$key]['quantity']=$val;
+        }
+    }
+}
+function removeFromCart($id){
+    unset($_SESSION['cart'][$id]);
+    if(empty($_SESSION['cart'])){
+        emptyCart();
+    }
+}
+function emptyCart(){
+    unset($_SESSION['cart']);
+}
+
+function checkout(){
+    updateCart();
+    if(checkLogin()){
+        $db = new DB();
+        $sql = "INSERT INTO 
+                book_orders(student_id, details, amount, shipping_details, created_at, modified_at) 
+                VALUES 
+                ( {$_SESSION['loggedin']['id']},
+                  '".addslashes(json_encode($_SESSION["cart"]))."',
+                  '".$_POST['total']."',
+                  'NOT SET',
+                  '". date("Y-m-d H:i:s") ."',
+                  '".date("Y-m-d H:i:s")."'
+                );";
+
+        $res = $db->create($sql);
+        if ($res){
+            emptyCart();
+            echo "You order has been placed. We will notify you for further details. Thank you for shopping with us.";
+            echo '<p><a href="?page=home">Continue Shopping</a></p>';
+            exit(200);
+        } else {
+            echo "There was an error while processing your order.";
+            echo '<p><a href="?page=cart">Back to the Cart</a></p>';
+            exit(200);
+        }
+    } else{
+        echo "We are checking out";
+        header('location: ?page=login');
+        die();
+    }
+}
+function logout(){
+    $_SESSION = array();
+// Destroy the session.
+    session_destroy();
+    header("location: ?page=login");
+}
+function checkLogin(){
+    if (isset($_SESSION["loggedin"])){
+        return true;
+    } else return false;
+}
+function login(){
+// Define variables and initialize with empty values
+    $username = $password = "";
+    $username_err = $password_err = "";
+
+
+    $db = new DB();
+// Processing form data when form is submitted
+
+    if($_SERVER["REQUEST_METHOD"] == "POST"){
+        // Check if username is empty
+        if(empty($_POST["email"])){
+            $username_err = 'Please enter an email address.';
+        } else{
+            $username = $_POST["email"];
+        }
+
+        // Check if password is empty
+        if(empty($_POST['password'])){
+            $password_err = 'Please enter your password.';
+        } else{
+            $password = $_POST['password'];
+        }
+
+        // Validate credentials
+
+        if(empty($username_err) && empty($password_err)){
+            // Prepare a select statement
+            $sql = "SELECT `id`,`name`,`email`, `password`,`role` FROM `students` WHERE `email` = '".$username."';";
+            $user = $db->getOne($sql);
+
+            if(!empty($user)){
+                if(password_verify($password,$user["password"])){
+                    echo ("User is valid");
+                    //Set the session here
+                    $_SESSION['loggedin'] = array(
+                        "email" => $user["email"],
+                        "name"  => $user["name"],
+                        "role"  => $user["role"],
+                        "id"  => $user["id"]
+                    );
+                    header("location:?page=home",true,200);
+                } else{
+                    echo "Wrong Password";
+                    die();
+                }
+            } else{
+                echo "The user does not exist";
+                die();
+            }
+        } else{
+            echo "An error occurred while finding the user";
+            die();
+        }
+    }
+}
+function register(){
+    $db = new DB();
+    $db->runQuery('START TRANSACTION');
+    $sql = "INSERT INTO 
+                students (name, email, `password`, created_at, modified_at) 
+                VALUES 
+                ( '".$_POST["name"]."',
+                  '".$_POST["email"]."',
+                  '".password_hash($_POST["password"],PASSWORD_BCRYPT)."',
+                  '". date("Y-m-d H:i:s") ."',
+                  '".date("Y-m-d H:i:s")."'
+                );";
+    $res = $db->create($sql);
+    if ($res){
+        $newID = $res;
+        /*Create student profile */
+        $profile_sql = "INSERT INTO student_profiles 
+        (address_line_1, 
+        address_line_2, 
+        city, 
+        state, 
+        country, 
+        email, 
+        phone, 
+        hobbies, 
+        book_genres, 
+        language1, 
+        language2, 
+        language3, 
+        user_id) VALUES (
+          '','','','','US','".$_POST['email']."','','','','English','','',$newID
+        )";
+        $res2 = $db->create($profile_sql);
+        if($res2){
+            $db->runQuery('COMMIT');
+            echo "Registration Successful. Redirecting to login...";
+            header('location: "?page=login"',true,201);
+        } else{
+            $db->runQuery('ROLLBACK');
+            echo "Registration Failed. Please try again. Redirecting back...";
+            echo $profile_sql;
+            header('location: "?page=register"', true, 400);
+            exit(200);
+        }
+    } else {
+        $db->runQuery('ROLLBACK');
+        echo "Registration Failed. Please try again. Redirecting back...";
+        echo $sql;
+        header('location: "?page=register"', true, 400);
+        exit(200);
+    }
+}
+function getCartBooks(){
+    $sql="SELECT * FROM books WHERE id IN (";
+    //if it does not been initialized
+    if(!isset($_SESSION['cart']))
+    {
+        //init to empty array
+        $_SESSION['cart'] = array();
+    }
+    
+    //check if the cart array is empty
+    if(sizeOf($_SESSION['cart']) == 0)
+    {
+         // empty result
+        $cartbooks = array();
+        return $cartbooks;
+    }
+    
+    foreach($_SESSION['cart'] as $id => $value) {
+        $sql.=$id.",";
+    }
+
+    $sql= trim($sql,',').") ORDER BY title ASC";
+    $db = new DB();
+    $cartbooks = $db->get($sql);
+    return $cartbooks;
+}
+function getMe(){
+    if (checkLogin()){
+        $id = $_SESSION['loggedin']['id'];
+        $sql = "SELECT s.id, s.email, s.name,s.role, s.created_at, sp.* FROM student_profiles sp 
+                LEFT JOIN students s ON s.id = sp.user_id
+          WHERE s.id=$id";
+        $db = new DB();
+        $profile = $db->getOne($sql);
+        return $profile;
+    } else {
+        header("location: ?page=login");
+    }
+    return false;
+}
+
+function addNewBook($data){
+    if ($_SESSION['loggedin']['role']!=='admin'):
+        $_SESSION['alerts'] = AlertMessage('Error! You are not authorized to add a new book','danger');
+        return false;
+    endif;
+    $sql = "INSERT INTO books(title, ISBN, author, publisher, publishing_date, price, cover_url, created_at, modified_at, description) 
+        VALUES
+        (
+        '{$data['title']}',
+        '{$data['ISBN']}',
+        '{$data['author']}',
+        '{$data['publisher']}',
+        '{$data['publishing_date']}',
+        '{$data['price']}',
+        '{$data['cover_url']}',
+        '".date('Y-m-d H:i:s')."',
+        '".date('Y-m-d H:i:s')."',
+        '{$data['description']}'
+        )";
+    $db = new DB();
+    $res = $db->create($sql);
+    if($res){
+        $msg = "Book Added!";
+        $_SESSION['alerts'] = AlertMessage($msg,'success');
+        return true;
+    } else{
+        $msg = "Error while adding book";
+        $_SESSION['alerts'] = AlertMessage($msg,'danger');
+        return false;
+    }
+}
+function AlertMessage($message, $type='info'){
+    switch ($type){
+        case 'danger':
+            $return = "
+                <div class=\"w3-panel w3-red w3-display-container\">
+                  <span onclick=\"this.parentElement.style.display='none'\" class=\"w3-button w3-red w3-large w3-display-topright\">×</span>
+                  <h3>Error!</h3>
+                  <p>$message</p>
+                </div>
+            ";
+            break;
+        case 'warning':
+            $return = "
+                <div class=\"w3-panel w3-yellow w3-display-container\">
+                  <span onclick=\"this.parentElement.style.display='none'\" class=\"w3-button w3-yellow w3-large w3-display-topright\">×</span>
+                  <h3>Warning!</h3>
+                  <p>$message</p>
+                </div>
+            ";
+            break;
+        case 'info':
+            $return = "
+            <div class=\"w3-panel w3-blue w3-display-container\">
+              <span onclick=\"this.parentElement.style.display='none'\" class=\"w3-button w3-blue w3-large w3-display-topright\">×</span>
+              <h3>Info!</h3>
+              <p>$message</p>
+            </div>
+            ";
+            break;
+        case 'success':
+            $return = "
+            <div class=\"w3-panel w3-green w3-display-container\">
+              <span onclick=\"this.parentElement.style.display='none'\" class=\"w3-button w3-green w3-large w3-display-topright\">×</span>
+              <h3>Success!</h3>
+              <p>$message</p>
+            </div>
+            ";
+            break;
+        default:
+            $return = "
+            <div class=\"w3-panel w3-blue w3-display-container\">
+              <span onclick=\"this.parentElement.style.display='none'\" class=\"w3-button w3-blue w3-large w3-display-topright\">×</span>
+              <h3>Info!</h3>
+              <p>$message</p>
+            </div>
+            ";
+            break;
+    }
+    return $return;
+}
+About.php
+<?php
+?>
+ABOUT US
+The best books available
+Admin.php
+<?php
+$profile = getMe();
+$books = getAllBooks();
+if($profile['role']!=='admin'):
+    echo "You are not admin";
+    header("location: ?page=home");
+    die('You are not admin');
+endif
+?>
+<!--Alerts-->
+<?php if (isset($_SESSION['alerts'])):?>
+    <p class="w3-center">
+        <?php echo $_SESSION['alerts'];?>
+    </p>
+    <?php
+    unset($_SESSION['alerts']);
+endif;?>
+<!--PROCESSOR-->
+<?php
+if (isset($_POST['action'])):
+    processAction($_POST['action']);
+    header("location: ?page=admin");
+    die('You are not admin');
+endif;
+?>
+<div class="w3-card white">
+    <div class="w3-container w3-theme">
+        <h3>Book Store</h3>
+    </div>
+    <div class="w3-container">
+        <h3 class="w3-text-theme">Available Books</h3>
+    </div>
+    <ul class="w3-ul w3-border-top">
+        <?php foreach ($books as $book):?>
+            <li class="w3-teal">
+                <h3><?php echo $book['title']?></h3>
+                <h5 class="">Author: <?php echo $book['author']?></h5>
+                <p class=""><?php echo $book['description']?></p>
+            </li>
+        <?php endforeach;?>
+    </ul>
+    <div class="dropdown-divider"></div>
+    <div class="w3-container w3-theme w3-large">
+        <a class="w3-right w3-button w3-green"
+           onclick="document.getElementById('modal-add-new-book').style.display='block'">
+            <i class="fa fa-plus"></i>
+            New Book
+        </a>
+        <!-- The Modal -->
+        <div id="modal-add-new-book" class="w3-modal">
+
+            <div class="w3-modal-content">
+                <header class="w3-container w3-teal">
+                    <span onclick="document.getElementById('modal-add-new-book').style.display='none'"
+                            class="w3-button w3-display-topright">&times;</span>
+                    <h2>Create New Book</h2>
+                </header>
+
+                <form method="POST" action="" class="w3-container w3-card-4">
+                    <br>
+                    <p>
+                        <label class="w3-text-grey">Title</label>
+                        <input name="title" class="w3-input w3-border" type="text" required="">
+                    </p>
+                    <p>
+                        <label class="w3-text-grey">Author</label>
+                        <input name="author" class="w3-input w3-border" type="text" required="">
+                    </p>
+                    <p>
+                        <label class="w3-text-grey">Publisher</label>
+                        <input name="publisher" class="w3-input w3-border" type="text" required="">
+                    </p>
+                    <p>
+                        <label class="w3-text-grey">Publishing Date</label>
+                        <input name="publishing_date" class="w3-input w3-border" type="date" required>
+                    </p>
+                    <p>
+                        <label class="w3-text-grey">ISBN</label>
+                        <input name="ISBN" class="w3-input w3-border" type="text" required>
+                    </p>
+                    <p>
+                        <label class="w3-text-grey">Description</label>
+                        <textarea name="description" class="w3-input w3-border" style="resize:none"></textarea>
+                    </p>
+                    <p>
+                        <label class="w3-text-grey">Unit Price $</label>
+                        <input name="price" class="w3-input w3-border" type="number" step="0.01" required>
+                    </p>
+                    <p>
+                        <label class="w3-text-grey">Cover Image Link</label>
+                        <input name="cover_url" class="w3-input w3-border" type="url">
+                    </p>
+                    <br>
+                    <p>
+                        <button type="submit" class="w3-btn w3-padding w3-teal" style="width:120px">Add <i class="fa fa-plus"></i></button>
+                    </p>
+                    <input type="hidden" name="action" value="new_book">
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+Cart.php
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-md-10">
+            <h1 class="text-center text-uppercase">View cart</h1>
+            <a href="?page=home">Go back home</a>
+            <form id="cartform" method="POST" action="?page=cart&action=process_cart">
+
+                <table class="table table-bordered table-striped table-success">
+
+                    <tr>
+                        <th>Title</th>
+                        <th>Quantity</th>
+                        <th>Unit Price</th>
+                        <th>Amount</th>
+                        <th>Action</th>
+                    </tr>
+
+                    <?php
+
+                    $cartbooks = getCartBooks();
+                    $cart = $_SESSION["cart"];
+                    $totalprice=0;
+                    foreach ($cartbooks as $cartbook){
+                        $id = $cartbook["id"];
+                        $subtotal=$_SESSION["cart"][$id]['quantity']*$cartbook['price'];
+                        $totalprice+=$subtotal;
+                        ?>
+                        <tr>
+                            <td><?php echo $cartbook['title'] ?></td>
+                            <td><input type="text" name="quantity[<?php echo $cartbook['id'] ?>]" size="5"
+                                       value="<?php echo $cart[$id]['quantity'] ?>" /></td>
+                            <td>$ <?php echo $cartbook['price'] ?></td>
+                            <td>$
+                                <?php echo $cart[$id]['quantity']*$cartbook['price']; ?></td>
+                            <td><a href="?page=cart&action=remove_cart&id=<?php echo $id?>" class=""><i class="fa fa-2x text-danger fa-trash-o"></i></a></td>
+                        </tr>
+                        <?php
+                    }
+                    ?>
+                    <tr>
+                        <td colspan="3" class="text-right"><strong>Total Price:</strong> </td>
+                        <td><strong>$ <?php echo $totalprice ?></strong></td>
+                        <input type="hidden" name="total" value="<?php echo $totalprice ?>">
+                    </tr>
+                </table>
+                <br />
+                <div class="submit-controls btn-group d-md-flex justify-content-center">
+                    <input type="hidden" id="submit_actor" name="submit_actor">
+                    <button type="submit" role="submit" name="update" class="btn btn-warning" href>Update Cart</button>
+                    <button type="submit" role="submit" name="checkout" class="btn btn-success" href>Checkout</button>
+                    <button type="submit" role="submit" name="empty" class="btn btn-danger " href>Empty Cart</button>
+                </div>
+
+            </form>
+            <br />
+            <p>To remove an item, set it's quantity to 0. </p>
+        </div>
+    </div>
+</div>
+Home.php
+<?php $books = getAllBooks();?>
+<div class="w3-container w3-center">
+    <hr>
+    <h3>Books Available in the Store</h3>
+</div>
+<div class="w3-row-padding">
+    <?php
+    foreach ($books as $book):
+    ?>
+    <div class="w3-quarter">
+        <div class="w3-card">
+            <a href class="img-link">
+                <img src=<?php echo $book["cover_url"]?> alt="Avatar" style="width:100%">
+            </a>
+            <div class="w3-container">
+                <div class="card-body" style="display: none;">
+                    <h5><?php echo $book["title"]?> by <?php echo $book["author"]?></h5>
+                    <p><?php echo $book['description']?></p>
+                </div>
+                <div class="card-link">
+                    <p><span class="w3-badge float-right font-weight-bold w3-xlarge w3-green">$<?php echo (float)$book["price"]?></span></p>
+                    <a class="w3-button jazzberry text-white w3-theme" href="?page=home&action=add&id=<?php echo $book['id'] ?>">
+                        <i class="fa fa-2x fa-cart-plus"></i>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php
+    endforeach;
+    ?>
+</div>
+Login.php
+<?php
+$loggedIn =checkLogin();
+
+if($loggedIn){
+    $my = $_SESSION["loggedin"];
+    echo '
+    <div class="container h-100">
+        <div class="h-100 align-content-center justify-content-center">
+            <div class="">
+                <h>You are already logged in as '.$my["email"].'</h>
+            </div>
+        </div>
+    </div>';
+    exit(200);
+
+}
+?>
+<div class="container">
+    <div class="row justify-content-center">
+        <div id="loginbox" style="margin-top:50px;" class="mainbox col-md-6 col-md-offset-3 col-sm-8 col-sm-offset-2">
+            <div class="panel panel-info" >
+                <div class="panel-heading">
+                    <div class="panel-title">Login</div>
+                    <div style="float:right; font-size: 80%; position: relative; top:-10px"><a href="#">Forgot password?</a></div>
+                </div>
+
+                <div style="padding-top:30px" class="panel-body" >
+
+                    <div style="display:none" id="login-alert" class="alert alert-danger col-sm-12"></div>
+
+                    <form id="loginform" class="form-horizontal" role="form" method="post" action="?page=home&action=login">
+
+                        <div style="margin-bottom: 25px" class="input-group">
+                            <span class="input-group-addon"><i class="fa fa-at text-success"></i></span>
+                            <input id="email" type="text" class="form-control" name="email" value="" placeholder=" Email">
+                        </div>
+
+                        <div style="margin-bottom: 25px" class="input-group">
+                            <span class="input-group-addon"><i class="fa fa-lock text-danger"></i></span>
+                            <input id="password" type="password" class="form-control" name="password" placeholder="password">
+                        </div>
+
+                        <div style="margin-top:10px" class="form-group justify-content-center">
+                            <!-- Button -->
+                            <div class="col-sm-12 controls">
+                                <button id="login-submit" type="submit" role="submit" class="btn btn-success w-25">Login</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <div class="col-md-12 control">
+                                <div style="border-top: 1px solid#888; padding-top:15px; font-size:85%" >
+                                    Don't have an account?
+                                    <a href="?page=register">
+                                        Register Here
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+Register.php
+<div class="container">
+    <div class="row justify-content-center">
+        <div id="signupbox" style="margin-top:50px" class="col-md-6 col-sm-8">
+            <div class="panel panel-info">
+                <div class="panel-heading">
+                    <div class="panel-title"><h3>Register</h3></div>
+                </div>
+                <div class="panel-body" >
+                    <form id="signupform" class="form-horizontal" role="form" method="POST" action="?page=login&action=register">
+                        <div id="signupalert" style="display:none" class="alert alert-danger">
+                            <p>Error:</p>
+                            <span></span>
+                        </div>
+                        <div class="form-group">
+                            <label for="email" class="control-label">Email</label>
+                            <div class="">
+                                <input type="text" class="form-control" name="email" placeholder="Email Address">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="name" class="control-label">Name</label>
+                            <div class="">
+                                <input type="text" class="form-control" name="name" placeholder="Last Name">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="password" class="control-label">Password</label>
+                            <div class="">
+                                <input type="password" class="form-control" name="password" placeholder="Password">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="cpassword" class="control-label">Confirm Password</label>
+                            <div class="">
+                                <input type="password" class="form-control" name="cpassword" placeholder="Password">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <div class="">
+                                <button id="btn-signup" type="submit" class="btn btn-danger"><i class="fa fa-user-plus"></i> &nbsp Register</button>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <div class="col-md-12 control">
+                                <div style="border-top: 1px solid#888; padding-top:0px; font-size:85%" >
+                                    Already Registered?
+                                    <a href="?page=login">
+                                        Login Here
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+Footer.php
+<!-- Footer -->
+<footer class="py-4 bg-secondary">
+    <div class="container">
+        <p class="m-0 text-center text-white">Copyright &copy; Harris Book Store 2018</p>
+    </div>
+    <!-- /.container -->
+</footer>
+
+<script src="js/vendor/modernizr-3.5.0.min.js"></script>
+<script src="//code.jquery.com/jquery-3.2.1.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+<script>window.jQuery || document.write('<script src="js/vendor/jquery-3.2.1.min.js"><\/script>')</script>
+<script src="//cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.3/umd/popper.min.js" integrity="sha384-vFJXuSJphROIrBnz7yo7oB41mKfc8JzQZiCq4NCceLEaO4IHwicKwpJf9c9IpFgh" crossorigin="anonymous"></script>
+<script src="//maxcdn.bootstrapcdn.com/bootstrap/4.0.0-beta.2/js/bootstrap.min.js" integrity="sha384-alpBpkh1PFOepccYVYDB4do5UnbKysX5WZXm3XxPqe5iKTfUKjNkCk9SaVuEZflJ" crossorigin="anonymous"></script>
+<script src="js/plugins.js"></script>
+<script src="js/main.js"></script>
+Header.php
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <title><?php echo $_title?></title>
+    <meta name="description" content="">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <link rel="manifest" href="site.webmanifest">
+    <link rel="apple-touch-icon" href="icon.png">
+    <!-- Place favicon.ico in the root directory -->
+
+    <link rel="stylesheet" href="css/bootstrap.min.css">
+    <link rel="stylesheet" href="css/bootstrap-grid.min.css">
+    <link rel="stylesheet" href="//www.w3schools.com/w3css/4/w3.css">
+    <link rel="stylesheet" href="//fonts.googleapis.com/css?family=Lato">
+    <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+    <link rel="stylesheet" href="//maxcdn.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css">
+    <link rel="stylesheet" href="css/normalize.css">
+    <link rel="stylesheet" href="css/main.css">
+</head>
+Index.php
+<?php
+session_start();
+require ('includes/functions.php');
+
+if(isset($_GET['page'])){
+    $pages=array(
+        "products",
+        "cart",
+        "about",
+        "logout",
+        "profile",
+        "login",
+        "register",
+        "admin"
+    );
+
+    if(in_array($_GET['page'], $pages)) {
+
+        $_page=$_GET['page'];
+
+    }else{
+
+        $_page="home";
+
+    }
+
+}else{
+
+    $_page="home";
+
+}
+
+$_title = "My BookStore::".strtoupper($_page);
+
+if (isset($_GET["action"])){
+    processAction($_GET["action"]);
+}
+?>
+<!doctype html>
+<html lang="">
+    <?php include "header.inc.php"?>
+    <body>
+        <!--NAVIGATION-->
+        <?php include "nav.inc.php"?>
+        <!--END NAVIGATION-->
+        <!--Main Body-->
+        <div id="container" class="push-top">
+            <?php require ("pages/".$_page.".php")?>
+        </div><!--end container-->
+        <?php include "footer.inc.php"?>
+    </body>
+</html>
+Nav.inc
+<!-- Navigation -->
+<?php
+$home_active        = $_page==='home'?'active':'';
+$about_active       = $_page==='about'?'active':'';
+$login_active       = $_page==='login'?'active':'';
+$register_active    = $_page==='register'?'active':'';
+$admin_active       = $_page==='admin'?'active':'';
+$profile_active     = $_page==='profile'?'active':'';
+$cart_active        = $_page==='cart'?'active':'';
+$products_active    = $_page==='products'?'active':'';
+
+?>
+<nav class="navbar navbar-expand-lg text-white jazzberry fixed-top">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="?page=home">My Book Store</a>
+        <button class="navbar-toggler btn-success" type="button" data-toggle="collapse" data-target="#navbarResponsive" aria-controls="navbarResponsive" aria-expanded="false" aria-label="Toggle navigation">
+            <i class="fa fa-bars" aria-hidden="true"></i>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarResponsive">
+            <ul class="navbar-nav ml-auto">
+                <li id="nav-home" class="nav-item <?php echo $home_active?>">
+                    <a class="nav-link" href="?page=home">Home
+                        <span class="sr-only">(current)</span>
+                    </a>
+                </li>
+                <li id="nav-about" class="nav-item <?php echo $about_active?>">
+                    <a class="nav-link" href="?page=about">About</a>
+                </li>
+
+                <?php if(!checkLogin()){
+                    ?>
+                    <li class="nav-item <?php echo $login_active?>">
+                        <a class="nav-link" href="?page=login">Login</a>
+                    </li>
+
+                    <li class="nav-item <?php echo $register_active?>">
+                        <a class="nav-link" href="?page=register">Register</a>
+                    </li>
+                    <?php
+                } else{
+                    ?>
+                    <li id="nav-profile" class="nav-item <?php echo $profile_active?>">
+                        <a class="nav-link" href="?page=profile">Welcome, <?php echo $_SESSION["loggedin"]["name"];?></a>
+                    </li>
+                    <?php if($_SESSION['loggedin']['role'] ==='admin'):?>
+                        <li id="nav-profile" class="nav-item <?php echo $admin_active?>">
+                            <a class="nav-link" href="?page=admin">Admin</a>
+                        </li>
+                    <?php endif;?>
+                    <li id="nav-logout" class="nav-item">
+                        <a class="nav-link" href="?page=login&action=logout">Logout</a>
+                    </li>
+                    <?php
+                }?>
+
+                <li class="nav-item <?php echo $cart_active?>">
+                    <a class="nav-link" href="?page=cart">
+                        <i class="fa fa-shopping-cart"></i>
+                        <?php if (isset($_SESSION["cart"])){?><span class='badge badge-warning'><?php echo sizeof($_SESSION["cart"])?></span><?php }?>
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</nav>
